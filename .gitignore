@@ -1,0 +1,6 @@
+gnnenv/
+__pycache__/
+data/
+models/
+fingerprints/
+eval/
