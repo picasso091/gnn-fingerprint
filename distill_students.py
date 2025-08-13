@@ -1,4 +1,3 @@
-# distill_students.py
 import argparse, json, random, torch, torch.nn.functional as F
 from pathlib import Path
 from torch_geometric.datasets import Planetoid
@@ -40,12 +39,12 @@ def main():
     ap.add_argument('--meta_path', default='models/target_meta.json')
     ap.add_argument('--target_path', default='models/target_model.pt')
     ap.add_argument('--archs', default='gat,sage')
-    ap.add_argument('--epochs', type=int, default=10)  # per paper
+    ap.add_argument('--epochs', type=int, default=10)
     ap.add_argument('--lr', type=float, default=0.01)
     ap.add_argument('--wd', type=float, default=5e-4)
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--count_per_arch', type=int, default=50)
-    ap.add_argument('--out_dir', type=str, default='models/positives')  # << here
+    ap.add_argument('--out_dir', type=str, default='models/positives')
     args = ap.parse_args()
 
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
@@ -77,7 +76,7 @@ def main():
                 loss = kd_loss(s_logits, t_logits)
                 loss.backward(); opt.step()
 
-            out_pt = f'{args.out_dir}/distill_{arch}_{i:03d}.pt'   # << here
+            out_pt = f'{args.out_dir}/distill_{arch}_{i:03d}.pt'
             torch.save(student.state_dict(), out_pt)
             with open(out_pt.replace('.pt','.json'),'w') as f:
                 json.dump({"arch": arch, "hidden": 64, "num_classes": num_classes, "pos_kind": "distill"}, f)

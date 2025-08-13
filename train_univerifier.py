@@ -1,18 +1,26 @@
-
 """
-Trains the FPVerifier V_ω over the dataset created by generate_univerifier_dataset.py
-This is the "post-process" verifier, but for full fidelity use fingerprint_generator's alternating loop.
+Trains the Univerifier on features built from fingerprints (MLP: [128,64,32] + LeakyReLU).
+Loads X,y from generate_univerifier_dataset.py and saves weights + a tiny meta JSON.
 """
-import argparse, torch, torch.nn as nn, torch.nn.functional as F
 
-class Verifier(nn.Module):
-    def __init__(self, in_dim):
+import argparse, json, torch, time
+import torch.nn as nn
+import torch.nn.functional as F
+from pathlib import Path
+
+class FPVerifier(nn.Module):
+    """verifier: in -> 128 -> 64 -> 32 -> 1 (Sigmoid), LeakyReLU between."""
+    def __init__(self, in_dim: int):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(in_dim, max(32, in_dim//2)),
-            nn.ReLU(),
-            nn.Linear(max(32, in_dim//2), 1),
-            nn.Sigmoid()
+            nn.Linear(in_dim, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, 32),
+            nn.LeakyReLU(),
+            nn.Linear(32, 1),
+            nn.Sigmoid(),
         )
     def forward(self, x):
         return self.net(x)
@@ -22,42 +30,71 @@ def main():
     ap.add_argument('--dataset', type=str, default='fingerprints/univerifier_dataset.pt')
     ap.add_argument('--epochs', type=int, default=200)
     ap.add_argument('--lr', type=float, default=1e-3)
+    ap.add_argument('--weight_decay', type=float, default=0.0)
     ap.add_argument('--val_split', type=float, default=0.2)
+    ap.add_argument('--fingerprints_path', type=str, default='fingerprints/fingerprints.pt',
+                    help='Optional: used to sanity-check input dim against saved ver_in_dim')
+    ap.add_argument('--out', type=str, default='fingerprints/univerifier.pt')
     args = ap.parse_args()
 
+    # Load dataset
     pack = torch.load(args.dataset, map_location='cpu')
-    X, y = pack['X'], pack['y'].unsqueeze(-1)
-    X = X.detach()
-    y = y.detach()
-    
-    n = X.size(0)
-    n_val = int(args.val_split * n)
-    perm = torch.randperm(n)
-    X_train, y_train = X[perm[:-n_val]], y[perm[:-n_val]]
-    X_val, y_val = X[perm[-n_val:]], y[perm[-n_val:]]
+    X = pack['X'].float().detach()             # [N, D]
+    y = pack['y'].float().view(-1, 1).detach() # [N, 1]
+    N, D = X.shape
 
-    V = Verifier(X.size(1))
-    opt = torch.optim.Adam(V.parameters(), lr=args.lr)
+    try:
+        fp_pack = torch.load(args.fingerprints_path, map_location='cpu')
+        ver_in_dim = int(fp_pack.get('ver_in_dim', D))
+        if ver_in_dim != D:
+            raise RuntimeError(f'Input dim mismatch: dataset dim {D} vs ver_in_dim {ver_in_dim}')
+    except FileNotFoundError:
+        pass
 
-    best_val, best_state = 0.0, None
-    for ep in range(1, args.epochs+1):
+    # Train/val split
+    n_val = max(1, int(args.val_split * N))
+    perm = torch.randperm(N)
+    idx_tr, idx_val = perm[:-n_val], perm[-n_val:]
+    X_tr, y_tr = X[idx_tr], y[idx_tr]
+    X_val, y_val = X[idx_val], y[idx_val]
+
+    # Model/optim
+    V = FPVerifier(D)
+    opt = torch.optim.Adam(V.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+    best_acc, best_state = 0.0, None
+    for ep in range(1, args.epochs + 1):
         V.train(); opt.zero_grad()
-        pred = V(X_train)
-        loss = F.binary_cross_entropy(pred, y_train)
+        p = V(X_tr)                                     # [n_tr, 1], in [0,1]
+        loss = F.binary_cross_entropy(p, y_tr)
         loss.backward(); opt.step()
+
         with torch.no_grad():
             V.eval()
             pv = V(X_val)
             val_loss = F.binary_cross_entropy(pv, y_val)
-            val_acc = ((pv>=0.5).float()==y_val).float().mean().item()
-        if val_acc > best_val:
-            best_val, best_state = val_acc, {k:v.cpu().clone() for k,v in V.state_dict().items()}
-        if ep % 20 == 0 or ep == args.epochs:
-            print(f"Epoch {ep:03d} | train_bce {loss.item():.4f} | val_bce {val_loss.item():.4f} | val_acc {val_acc:.4f}")
+            val_acc = ((pv >= 0.5).float() == y_val).float().mean().item()
 
-    V.load_state_dict(best_state)
-    torch.save(V.state_dict(), 'fingerprints/univerifier.pt')
-    print(f"Saved fingerprints/univerifier.pt | Best Val Acc {best_val:.4f}")
+        if val_acc > best_acc:
+            best_acc = val_acc
+            best_state = {k: v.cpu().clone() for k, v in V.state_dict().items()}
+
+        if ep % 20 == 0 or ep == args.epochs:
+            print(f'Epoch {ep:03d} | train_bce {loss.item():.4f} '
+                  f'| val_bce {val_loss.item():.4f} | val_acc {val_acc:.4f}')
+
+    # Save best
+    if best_state is None:
+        best_state = V.state_dict()
+    Path('fingerprints').mkdir(exist_ok=True, parents=True)
+    torch.save(best_state, args.out)
+    with open(args.out.replace('.pt', '_meta.json'), 'w') as f:
+        json.dump({'in_dim': D, 'hidden': [128, 64, 32], 'act': 'LeakyReLU'}, f)
+    print(f'Saved {args.out} | Best Val Acc {best_acc:.4f} | Input dim D={D}')
 
 if __name__ == '__main__':
+    start_time = time.time()
     main()
+    end_time = time.time()
+    print("time taken: ", (end_time-start_time)/60 )
+

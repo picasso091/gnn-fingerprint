@@ -51,7 +51,7 @@ def main():
     set_seed(args.seed)
     dataset = Planetoid(root='data/cora', name='Cora')
     data = dataset[0]
-    # Override with 7/1/2 masks per paper
+
     train_mask, val_mask, test_mask = make_masks(data.num_nodes, 0.7, 0.1, seed=args.seed)
     data.train_mask, data.val_mask, data.test_mask = train_mask, val_mask, test_mask
 

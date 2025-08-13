@@ -7,7 +7,7 @@ from torch_geometric.datasets import Planetoid
 from torch_geometric.utils import dense_to_sparse, to_undirected
 import time
 # -------------------------
-# Paper defaults (Other Settings) [N=64, n=32, LR=1e-3, iters=1000]
+# [N=64, n=32, LR=1e-3, iters=1000]
 # Univerifier: 3 hidden layers [128, 64, 32] with LeakyReLU
 # -------------------------
 
@@ -30,7 +30,7 @@ def list_paths_from_globs(globs: List[str]) -> List[str]:
     return sorted(out)
 
 class FPVerifier(nn.Module):
-    # Paper arch: [128, 64, 32] + LeakyReLU, sigmoid output
+    # Arch: [128, 64, 32] + LeakyReLU, sigmoid output
     def __init__(self, in_dim: int):
         super().__init__()
         self.net = nn.Sequential(
@@ -59,6 +59,8 @@ def forward_on_fp(model, fp):
     A_bin = (A > 0.5).float()
     A_sym = torch.maximum(A_bin, A_bin.t())
     edge_index = dense_to_sparse(A_sym)[0]
+    if edge_index.numel() == 0:
+        edge_index = torch.arange(X.size(0)).repeat(2,1)
     edge_index = to_undirected(edge_index)
     logits = model(fp["X"], edge_index)          # keep graph for autograd
     return logits.mean(dim=0)
@@ -145,7 +147,7 @@ def edge_flip_step(models_pos, models_neg, fingerprints, V, flip_k=8):
 
 def train_verifier_step(models_pos, models_neg, fingerprints, V, opt):
     # Standard ascent on L wrt V parameters -> actually *maximize* L
-    # We can *minimize* -L instead.
+    # Can *minimize* -L instead.
     L, Zp, Zn = compute_loss(models_pos, models_neg, fingerprints, V)
     loss = -L
     opt.zero_grad()
@@ -166,19 +168,23 @@ def main():
     ap.add_argument('--positives_glob', default='models/positives/ftpr_*.pt,models/positives/distill_*.pt')
     ap.add_argument('--negatives_glob', default='models/negatives/negative_*.pt')
 
-    # Paper hyperparams
+    # Hyperparams
     # ap.add_argument('--P', type=int, default=64)             # number of fingerprints (N)
-    ap.add_argument('--P', type=int, default=12)             # number of fingerprints (N)
+    ap.add_argument('--P', type=int, default=12)             
     ap.add_argument('--n', type=int, default=8)             # nodes per fingerprint
-    # ap.add_argument('--n', type=int, default=32)             # nodes per fingerprint
-    # ap.add_argument('--iters', type=int, default=1000)       # alternating iterations
+    # ap.add_argument('--n', type=int, default=32)  
+    # ap.add_argument('--iters', type=int, default=1000)
     ap.add_argument('--iters', type=int, default=1)       # alternating iterations
-    ap.add_argument('--verifier_lr', type=float, default=1e-3)  # learning rate for V (paper)
+    ap.add_argument('--verifier_lr', type=float, default=1e-3)  # learning rate for V
     ap.add_argument('--e1', type=int, default=1)             # epochs for fingerprint updates per alternation
     ap.add_argument('--e2', type=int, default=1)             # epochs for verifier updates per alternation
     ap.add_argument('--alpha_x', type=float, default=0.01)   # step size for feature ascent
     ap.add_argument('--flip_k', type=int, default=8)         # edges flipped per step per fingerprint
     ap.add_argument('--seed', type=int, default=0)
+    # ap.add_argument('--m', type=int, default=64)
+    ap.add_argument('--m', type=int, default=1)       # sampled nodes per fingerprint
+
+
     args = ap.parse_args()
 
     set_seed(args.seed)
@@ -213,15 +219,20 @@ def main():
 
     # Initialize fingerprints I = {I_p} with small random X, sparse A near 0.5 to allow flips
     fingerprints = []
+    if args.m > args.n:
+        raise ValueError(f"--m ({args.m}) must be <= --n ({args.n})")
+
     for _ in range(args.P):
         X = torch.randn(args.n, in_dim) * 0.1
-        A = torch.rand(args.n, args.n) * 0.2 + 0.4  # around 0.5
+        A = torch.rand(args.n, args.n) * 0.2 + 0.4
         A = torch.triu(A, diagonal=1)
         A = A + A.t()
         torch.diagonal(A).zero_()
-        fingerprints.append({"X": X, "A": A})
+        idx = torch.randperm(args.n)[:args.m]  # fixed per-fingerprint
+        fingerprints.append({"X": X, "A": A, "node_idx": idx})
 
-    ver_in_dim = args.P * num_classes
+
+    ver_in_dim = args.P * args.m * num_classes
     V = FPVerifier(ver_in_dim)
     optV = torch.optim.Adam(V.parameters(), lr=args.verifier_lr)
 
@@ -249,11 +260,13 @@ def main():
         clean_fps.append({
             "X": fp["X"].detach().clone(),
             "A": fp["A"].detach().clone(),
+            "node_idx": fp["node_idx"].detach().clone(),
         })
     torch.save(
-        {"fingerprints": clean_fps, "verifier": V.state_dict(), "in_dim": ver_in_dim},
-        'fingerprints/fingerprints.pt'
+        {"fingerprints": clean_fps, "verifier": V.state_dict(), "ver_in_dim": ver_in_dim},
+        "fingerprints/fingerprints.pt"
     )
+
     print("Saved fingerprints/fingerprints.pt")
 
 if __name__ == '__main__':
@@ -261,5 +274,5 @@ if __name__ == '__main__':
     main()
     end_time = time.time()
 
-    print("Time taken: ", (end_time - start_time)/60 )
+    print("Time taken: ", (end_time - start_time)/60)
 

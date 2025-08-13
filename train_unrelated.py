@@ -67,7 +67,7 @@ def main():
             if val > best_val:
                 best_val, best_state = val, {k:v.cpu().clone() for k,v in model.state_dict().items()}
         model.load_state_dict(best_state)
-        out_path = f"models/negative_{i:03d}.pt"
+        out_path = f"models/negatives/negative_{i:03d}.pt"
         torch.save(model.state_dict(), out_path)
         with open(out_path.replace('.pt','.json'), 'w') as f:
             json.dump({"arch": arch, "hidden": 64, "num_classes": dataset.num_classes, "seed": seed_i}, f)

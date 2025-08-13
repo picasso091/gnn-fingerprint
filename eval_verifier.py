@@ -1,139 +1,203 @@
-# eval_verifier.py
-import argparse, glob, json, torch, numpy as np
+"""
+Evaluate a trained Univerifier on positives ({target ∪ F+}) and negatives (F−)
+using saved fingerprints. Produces Robustness/Uniqueness curves and ARUC.
+
+- Uses the same node-level protocol as fingerprint_generator.py:
+  for each fingerprint I_p, select fp["node_idx"] node logits and concatenate.
+
+Outputs:
+  - A PNG plot (--out_plot)
+  - Prints ARUC and best-threshold stats
+"""
+
+import argparse, glob, json, math, torch
+import numpy as np
 import matplotlib.pyplot as plt
-from pathlib import Path
 from torch_geometric.datasets import Planetoid
 from torch_geometric.utils import dense_to_sparse
 from gcn import get_model
 
-def load_model_from_pair(pt_path, in_dim):
-    j = json.load(open(pt_path.replace('.pt','.json'),'r'))
-    m = get_model(j["arch"], in_dim, j["hidden"], j["num_classes"])
-    m.load_state_dict(torch.load(pt_path, map_location='cpu')); m.eval()
-    return m, j
+import torch.nn as nn
+class FPVerifier(nn.Module):
+    def __init__(self, in_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, 32),
+            nn.LeakyReLU(),
+            nn.Linear(32, 1),
+            nn.Sigmoid(),
+        )
+    def forward(self, x):
+        return self.net(x)
 
+
+# ----------------------------
+# Fingerprint forward (fixed nodes, no mean-pool)
+# ----------------------------
+@torch.no_grad()
 def forward_on_fp(model, fp):
-    edge_index = dense_to_sparse(fp["A"])[0]
-    logits = model(fp["X"], edge_index)  # [n, C]
-    return logits.mean(dim=0)
+    """
+    fp: dict with 'X' [n,in_dim], 'A' [n,n] in [0,1], 'node_idx' [m]
+    returns: [m*d] flattened selected-node logits
+    """
+    X = fp["X"]
+    A = fp["A"]
+    idx = fp["node_idx"]
 
+    A_bin = (A > 0.5).float()
+    A_sym = torch.triu(A_bin, diagonal=1)
+    A_sym = A_sym + A_sym.t()
+    edge_index = dense_to_sparse(A_sym)[0]
+
+    # Fallback if graph became empty
+    if edge_index.numel() == 0:
+        n = X.size(0)
+        edge_index = torch.arange(n, dtype=torch.long).repeat(2, 1)
+
+    logits = model(X, edge_index)   # [n, d]
+    sel = logits[idx, :]            # [m, d]
+    return sel.reshape(-1)           # [m*d]
+
+
+@torch.no_grad()
 def concat_for_model(model, fps):
-    with torch.no_grad():
-        return torch.cat([forward_on_fp(model, fp) for fp in fps], dim=-1)
+    parts = [forward_on_fp(model, fp) for fp in fps]
+    return torch.cat(parts, dim=0)   # [P*m*d]
 
-def split_models(positive_pts, negative_pts, seed=0):
-    rng = np.random.default_rng(seed)
-    pos = np.array(sorted(positive_pts))
-    neg = np.array(sorted(negative_pts))
-    rng.shuffle(pos); rng.shuffle(neg)
-    pos_mid, neg_mid = len(pos)//2, len(neg)//2
-    return (pos[:pos_mid], pos[pos_mid:]), (neg[:neg_mid], neg[neg_mid:])
+
+def list_paths_from_globs(globs_str):
+    globs = [g.strip() for g in globs_str.split(",") if g.strip()]
+    paths = []
+    for g in globs:
+        paths.extend(glob.glob(g))
+    return sorted(paths)
+
+
+def load_model_from_pt(pt_path, in_dim):
+    meta_path = pt_path.replace(".pt", ".json")
+    j = json.load(open(meta_path, "r"))
+    m = get_model(j["arch"], in_dim, j["hidden"], j["num_classes"])
+    m.load_state_dict(torch.load(pt_path, map_location="cpu"))
+    m.eval()
+    return m
+
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--fingerprints', default='fingerprints/fingerprints.pt')
-    ap.add_argument('--univerifier', default='fingerprints/univerifier.pt')
-    ap.add_argument('--positives_glob', default='models/positives/ftpr_*.pt,models/positives/distill_*.pt')
-    ap.add_argument('--negatives_glob', default='models/negatives/negative_*.pt')
-    ap.add_argument('--seed', type=int, default=0)
-    ap.add_argument('--outdir', default='eval')
+    ap.add_argument('--fingerprints_path', type=str, default='fingerprints/fingerprints.pt')
+    ap.add_argument('--verifier_path', type=str, default='fingerprints/univerifier.pt',
+                    help='Trained standalone Univerifier weights (from train_univerifier.py)')
+    ap.add_argument('--target_path', type=str, default='models/target_model.pt')
+    ap.add_argument('--target_meta', type=str, default='models/target_meta.json')
+    ap.add_argument('--positives_glob', type=str,
+                    default='models/positives/ftpr_*.pt,models/positives/distill_*.pt')
+    ap.add_argument('--negatives_glob', type=str, default='models/negatives/negative_*.pt')
+    ap.add_argument('--out_plot', type=str, default='plots/cora_gcn_aruc.png')
+    ap.add_argument('--save_csv', type=str, default='',
+                    help='Optional: path to save thresholds/robustness/uniqueness CSV')
     args = ap.parse_args()
 
-    Path(args.outdir).mkdir(parents=True, exist_ok=True)
-
-    # load fingerprints
-    pack = torch.load(args.fingerprints, map_location='cpu')
-    fps = [{"X": fp["X"].detach(), "A": fp["A"].detach()} for fp in pack["fingerprints"]]
-
-    # dataset info (for in_dim)
-    ds = Planetoid(root='data/cora', name='Cora')
+    # Ensure dataset dims for model reconstruction
+    ds = Planetoid(root="data/cora", name="Cora")
     in_dim = ds.num_features
+    num_classes = ds.num_classes
 
-    # collect model paths
-    pos_globs = [g.strip() for g in args.positives_glob.split(',') if g.strip()]
-    pos_paths = sorted(sum([glob.glob(g) for g in pos_globs], []))
+    # Load fingerprints (with node_idx)
+    pack = torch.load(args.fingerprints_path, map_location="cpu")
+    fps = pack["fingerprints"]
+    ver_in_dim_saved = int(pack.get("ver_in_dim", 0))
+
+    # Load models (target + positives + negatives)
+    tmeta = json.load(open(args.target_meta, "r"))
+    target = get_model(tmeta["arch"], in_dim, tmeta["hidden"], tmeta["num_classes"])
+    target.load_state_dict(torch.load(args.target_path, map_location="cpu"))
+    target.eval()
+
+    pos_paths = list_paths_from_globs(args.positives_glob)
     neg_paths = sorted(glob.glob(args.negatives_glob))
 
-    # split 1:1 (verifier train vs test); we evaluate on the held-out half (test)
-    (pos_train, pos_test), (neg_train, neg_test) = split_models(pos_paths, neg_paths, seed=args.seed)
-    print(f"[models] pos total={len(pos_paths)} neg total={len(neg_paths)} | eval on pos={len(pos_test)} neg={len(neg_test)}")
+    models_pos = [target] + [load_model_from_pt(p, in_dim) for p in pos_paths]
+    models_neg = [load_model_from_pt(n, in_dim) for n in neg_paths]
 
-    # load univerifier arch
-    class Verifier(torch.nn.Module):
-        def __init__(self, in_dim):
-            super().__init__()
-            self.net = torch.nn.Sequential(
-                torch.nn.Linear(in_dim, 128),
-                torch.nn.LeakyReLU(),
-                torch.nn.Linear(128, 64),
-                torch.nn.LeakyReLU(),
-                torch.nn.Linear(64, 32),
-                torch.nn.LeakyReLU(),
-                torch.nn.Linear(32, 1),
-                torch.nn.Sigmoid()
-            )
-        def forward(self, x): return self.net(x)
+    # Infer verifier input dim from a probe concat
+    z0 = concat_for_model(models_pos[0], fps)
+    D = z0.numel()
+    if ver_in_dim_saved and ver_in_dim_saved != D:
+        raise RuntimeError(f"Verifier input mismatch: D={D} vs ver_in_dim_saved={ver_in_dim_saved}")
 
-    # infer in-dim from fingerprints and #classes
-    num_classes = ds.num_classes
-    ver_in_dim = len(fps) * num_classes
-    V = Verifier(ver_in_dim)
-    V.load_state_dict(torch.load(args.univerifier, map_location='cpu'))
+    # Load verifier
+    V = FPVerifier(D)
+    V.load_state_dict(torch.load(args.verifier_path, map_location='cpu'))
     V.eval()
 
-    # compute logits for each model on fingerprints
+    # Collect scores
     with torch.no_grad():
-        # positives (target itself could be included too)
-        X_pos = []
-        for p in pos_test:
-            m,_ = load_model_from_pair(p, in_dim)
-            X_pos.append(concat_for_model(m, fps))
-        X_pos = torch.stack(X_pos) if X_pos else torch.empty(0, ver_in_dim)
+        pos_scores = []
+        for m in models_pos:
+            z = concat_for_model(m, fps).unsqueeze(0)  # [1, D]
+            pos_scores.append(float(V(z)))
+        neg_scores = []
+        for m in models_neg:
+            z = concat_for_model(m, fps).unsqueeze(0)
+            neg_scores.append(float(V(z)))
 
-        X_neg = []
-        for n in neg_test:
-            m,_ = load_model_from_pair(n, in_dim)
-            X_neg.append(concat_for_model(m, fps))
-        X_neg = torch.stack(X_neg) if X_neg else torch.empty(0, ver_in_dim)
+    pos_scores = np.array(pos_scores)
+    neg_scores = np.array(neg_scores)
 
-        s_pos = V(X_pos).squeeze(-1).cpu().numpy()
-        s_neg = V(X_neg).squeeze(-1).cpu().numpy()
+    # Sweep thresholds
+    ts = np.linspace(0.0, 1.0, 201)
+    robustness = np.array([(pos_scores >= t).mean() for t in ts])  # TPR on positives
+    uniqueness = np.array([(neg_scores <  t).mean() for t in ts])  # TNR on negatives
+    shade = np.minimum(robustness, uniqueness)
 
-    # sweep thresholds and compute metrics
-    ths = np.linspace(0.0, 1.0, 101)
-    robust, unique, accs, inter = [], [], [], []
-    for t in ths:
-        tp = (s_pos >= t).mean() if len(s_pos)>0 else 0.0   # robustness (TPR)
-        tn = (s_neg <  t).mean() if len(s_neg)>0 else 0.0   # uniqueness (TNR)
-        robust.append(tp); unique.append(tn)
-        accs.append( (tp*len(s_pos) + tn*len(s_neg)) / (len(s_pos)+len(s_neg)) if (len(s_pos)+len(s_neg))>0 else 0.0 )
-        inter.append(min(tp, tn))  # overlap region at this threshold
+    # ARUC (area under shaded min curve)
+    aruc = np.trapz(shade, ts)
 
-    # ARUC = area under overlap region (R vs U curves intersect region)
-    # approximate with trapezoid on threshold axis
-    aruc = np.trapz(inter, ths)
+    # Best threshold (maximize min(robustness, uniqueness))
+    idx_best = int(np.argmax(shade))
+    t_best = float(ts[idx_best])
+    rob_best = float(robustness[idx_best])
+    uniq_best = float(uniqueness[idx_best])
+    # Accuracy at best threshold
+    acc_best = 0.5 * (rob_best + uniq_best)
 
-    print(f"ARUC: {aruc:.3f}")
-    print(f"Mean Test Accuracy (avg over thresholds): {np.mean(accs):.3f}")
-    print(f"Max Test Accuracy (best threshold): {np.max(accs):.3f}")
+    print(f"Models: +{len(models_pos)} | -{len(models_neg)} | D={D}")
+    print(f"ARUC = {aruc:.4f}")
+    print(f"Best threshold τ* = {t_best:.3f} | Robustness={rob_best:.3f} | Uniqueness={uniq_best:.3f} | Acc={acc_best:.3f}")
 
-    # plot curves
-    plt.figure()
-    plt.plot(ths, robust, label='Robustness (TPR)')
-    plt.plot(ths, unique, label='Uniqueness (TNR)')
-    # shade intersection region
-    plt.fill_between(ths, np.minimum(robust, unique), 0, alpha=0.2)
-    plt.xlabel('threshold')
-    plt.ylabel('score')
-    plt.ylim(0,1.01)
-    plt.title(f'Robustness vs Uniqueness (ARUC={aruc:.3f})')
-    plt.legend()
-    out_png = f"{args.outdir}/curves_cora_nodecls.png"
-    plt.savefig(out_png, dpi=180, bbox_inches='tight')
-    print(f"Saved {out_png}")
-    # also save per-threshold CSV
-    np.savetxt(f"{args.outdir}/metrics_cora_nodecls.csv",
-               np.column_stack([ths, robust, unique, accs, inter]),
-               delimiter=",", header="threshold,robustness,uniqueness,accuracy,intersection", comments="")
-if __name__ == '__main__':
+    # Optional CSV dump
+    if args.save_csv:
+        import csv
+        with open(args.save_csv, 'w', newline='') as f:
+            w = csv.writer(f)
+            w.writerow(['threshold', 'robustness', 'uniqueness', 'min_curve'])
+            for t, r, u, s in zip(ts, robustness, uniqueness, shade):
+                w.writerow([f"{t:.5f}", f"{r:.6f}", f"{u:.6f}", f"{s:.6f}"])
+        print(f"Saved CSV to {args.save_csv}")
+
+    # Plot
+    import os
+    os.makedirs(os.path.dirname(args.out_plot), exist_ok=True)
+    plt.figure(figsize=(4.0, 3.0), dpi=160)
+    title = f"Cora node-classification (ARUC={aruc:.3f})"
+    plt.title(title)
+    plt.plot(ts, robustness, label='Robustness (TPR)', linewidth=1.8)
+    plt.plot(ts, uniqueness, '--', label='Uniqueness (TNR)', linewidth=1.8)
+    plt.fill_between(ts, 0, shade, alpha=0.15)
+    plt.axvline(t_best, alpha=0.25, linewidth=1.0)
+    plt.xlabel('Threshold (τ)')
+    plt.ylabel('Score')
+    plt.ylim(0, 1.0)
+    plt.xlim(0, 1.0)
+    plt.legend(loc='lower center')
+    plt.tight_layout()
+    plt.savefig(args.out_plot, bbox_inches='tight')
+    print(f"Saved plot to {args.out_plot}")
+
+
+if __name__ == "__main__":
     main()

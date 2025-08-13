@@ -62,12 +62,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--target_path', type=str, default='models/target_model.pt')
     ap.add_argument('--meta_path', type=str, default='models/target_meta.json')
-    ap.add_argument('--epochs', type=int, default=10)  # per paper
+    ap.add_argument('--epochs', type=int, default=10)
     ap.add_argument('--lr', type=float, default=0.01)
     ap.add_argument('--wd', type=float, default=5e-4)
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--num_variants', type=int, default=200)
-    ap.add_argument('--out_dir', type=str, default='models/positives')  # << here
+    ap.add_argument('--out_dir', type=str, default='models/positives')
     args = ap.parse_args()
 
     set_seed(args.seed)
