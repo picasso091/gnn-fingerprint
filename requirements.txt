@@ -22,7 +22,6 @@ multidict==6.6.3
 networkx==3.4.2
 numpy==1.26.4
 packaging==25.0
-pandas==2.3.1
 pillow==11.3.0
 propcache==0.3.2
 psutil==7.0.0
