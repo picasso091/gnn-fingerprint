@@ -167,7 +167,7 @@ def main():
 
     print(f"Models: +{len(models_pos)} | -{len(models_neg)} | D={D}")
     print(f"ARUC = {aruc:.4f}")
-    print(f"Best threshold τ* = {t_best:.3f} | Robustness={rob_best:.3f} | Uniqueness={uniq_best:.3f} | Acc={acc_best:.3f}")
+    print(f"Best threshold = {t_best:.3f} | Robustness={rob_best:.3f} | Uniqueness={uniq_best:.3f} | Acc={acc_best:.3f}")
 
     # Optional CSV dump
     if args.save_csv:
@@ -185,9 +185,10 @@ def main():
     plt.figure(figsize=(4.0, 3.0), dpi=160)
     title = f"Cora node-classification (ARUC={aruc:.3f})"
     plt.title(title)
-    plt.plot(ts, robustness, label='Robustness (TPR)', linewidth=1.8)
-    plt.plot(ts, uniqueness, '--', label='Uniqueness (TNR)', linewidth=1.8)
-    plt.fill_between(ts, 0, shade, alpha=0.15)
+    overlap = np.minimum(robustness, uniqueness)
+    plt.plot(ts, robustness, color="#ff0000", linewidth=2.2, label="Robustness (TPR)")
+    plt.plot(ts, uniqueness, color="#0000ff", linestyle="--", linewidth=2.0, label="Uniqueness (TNR)")
+    plt.fill_between(ts, overlap, color="#888888", alpha=0.25, label="Overlap (ARUC region)")
     plt.axvline(t_best, alpha=0.25, linewidth=1.0)
     plt.xlabel('Threshold (τ)')
     plt.ylabel('Score')
