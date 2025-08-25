@@ -182,20 +182,28 @@ def main():
 
     # Plot
     os.makedirs(os.path.dirname(args.out_plot), exist_ok=True)
-    plt.figure(figsize=(4.0, 3.0), dpi=160)
-    title = f"CiteSeer link prediction (ARUC={aruc:.3f})"
-    plt.title(title)
-    plt.plot(ts, robustness, color="#ff0000", linewidth=2.2, label="Robustness (TPR)")
-    plt.plot(ts, uniqueness, color="#0000ff", linestyle="--", linewidth=2.0, label="Uniqueness (TNR)")
-    plt.fill_between(ts, overlap, color="#888888", alpha=0.25, label="Overlap (ARUC region)")
-    plt.axvline(t_best, alpha=0.25, linewidth=1.0)
-    plt.xlabel('Threshold (τ)')
-    plt.ylabel('Score')
-    plt.ylim(0, 1.0)
-    plt.xlim(0, 1.0)
-    plt.legend(loc='lower center')
+    fig, ax = plt.subplots(figsize=(7.5, 4.8), dpi=160)
+    ax.set_title(f"CiteSeer link-prediction • ARUC={aruc:.3f}", fontsize=14)
+    ax.grid(True, which='both', linestyle=':', linewidth=0.8, alpha=0.6)
+    ax.plot(ts, robustness, color="#ff0000", linewidth=2.0, label="Robustness (TPR)")
+    ax.plot(ts, uniqueness, color="#0000ff", linestyle="--", linewidth=2.0, label="Uniqueness (TNR)")
+    overlap = np.minimum(robustness, uniqueness)
+    ax.fill_between(ts, overlap, color="#bbbbbb", alpha=0.25, label="Overlap (ARUC region)")
+
+    # best-threshold vertical line
+    # ax.axvline(t_best, color="0.4", linewidth=2.0, alpha=0.6)
+
+    ax.set_xlabel("Threshold (τ)", fontsize=12)
+    ax.set_ylabel("Score", fontsize=12)
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.tick_params(labelsize=11)
+
+    leg = ax.legend(loc="lower left", frameon=True, framealpha=0.85,
+                    facecolor="white", edgecolor="0.8")
+
     plt.tight_layout()
-    plt.savefig(args.out_plot, bbox_inches='tight')
+    plt.savefig(args.out_plot, bbox_inches="tight")
     print(f"Saved plot to {args.out_plot}")
 
 
