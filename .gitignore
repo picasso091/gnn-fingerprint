@@ -4,3 +4,6 @@ data/
 models/
 fingerprints/
 eval/
+lp copy/
+gc copy/
+graph_match/
