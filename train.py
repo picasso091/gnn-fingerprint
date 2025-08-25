@@ -1,4 +1,3 @@
-
 import argparse, torch, random
 import torch.nn.functional as F
 from torch_geometric.datasets import Planetoid
@@ -7,7 +6,9 @@ from torch_geometric.loader import NeighborLoader
 from gcn import get_model
 
 def set_seed(seed):
-    random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
+    random.seed(seed); 
+    torch.manual_seed(seed); 
+    torch.cuda.manual_seed_all(seed)
 
 def make_masks(num_nodes, train_p=0.7, val_p=0.1, seed=0):
     g = torch.Generator().manual_seed(seed)
@@ -66,6 +67,7 @@ def main():
             best_val, best_state = val_acc, {k:v.cpu().clone() for k,v in model.state_dict().items()}
         if epoch % 20 == 0 or epoch == args.epochs:
             print(f"Epoch {epoch:03d} | loss {loss:.4f} | val {val_acc:.4f}")
+            
     model.load_state_dict(best_state)
     test_acc = eval_masks(model, data, data.test_mask)
     print(f"Best Val Acc: {best_val:.4f} | Test Acc: {test_acc:.4f}")

@@ -1,4 +1,3 @@
-# fine_tune_pirate.py
 import argparse, torch, copy, random, json
 from pathlib import Path
 import torch.nn.functional as F
@@ -66,7 +65,7 @@ def main():
     ap.add_argument('--lr', type=float, default=0.01)
     ap.add_argument('--wd', type=float, default=5e-4)
     ap.add_argument('--seed', type=int, default=0)
-    ap.add_argument('--num_variants', type=int, default=200)
+    ap.add_argument('--num_variants', type=int, default=100)
     ap.add_argument('--out_dir', type=str, default='models/positives')
     args = ap.parse_args()
 

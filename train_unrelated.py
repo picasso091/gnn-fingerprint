@@ -37,7 +37,7 @@ def eval_mask(model, data, mask):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--count', type=int, default=50)
-    ap.add_argument('--archs', type=str, default='gcn,sage,mlp')
+    ap.add_argument('--archs', type=str, default='gcn,sage')
     ap.add_argument('--epochs', type=int, default=200)
     ap.add_argument('--lr', type=float, default=0.01)
     ap.add_argument('--wd', type=float, default=5e-4)
