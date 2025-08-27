@@ -56,7 +56,7 @@ def forward_on_fp(model, fp):
     A_sym = torch.maximum(A_bin, A_bin.t())
     edge_index = dense_to_sparse(A_sym)[0]
     if edge_index.numel() == 0:
-        edge_index = torch.arange(X.size(0)).repeat(2,1)
+        edge_index = torch.arange(fp["X"].size(0)).repeat(2,1)
     edge_index = to_undirected(edge_index)
     logits = model(fp["X"], edge_index)
     return logits.mean(dim=0)
@@ -157,8 +157,8 @@ def main():
     ap.add_argument('--negatives_glob', default='models/negatives/negative_nc_*.pt')
 
     # Hyperparams
-    ap.add_argument('--P', type=int, default=12)             
-    ap.add_argument('--n', type=int, default=8)             # nodes per fingerprint
+    ap.add_argument('--P', type=int, default=8)             
+    ap.add_argument('--n', type=int, default=4)             # nodes per fingerprint
     # ap.add_argument('--n', type=int, default=32)  
     # ap.add_argument('--iters', type=int, default=1000)
     ap.add_argument('--iters', type=int, default=1)       # alternating iterations
@@ -166,7 +166,7 @@ def main():
     ap.add_argument('--e1', type=int, default=1)             # epochs for fingerprint updates per alternation
     ap.add_argument('--e2', type=int, default=1)             # epochs for verifier updates per alternation
     ap.add_argument('--alpha_x', type=float, default=0.01)   # step size for feature ascent
-    ap.add_argument('--flip_k', type=int, default=8)         # edges flipped per step per fingerprint
+    ap.add_argument('--flip_k', type=int, default=4)         # edges flipped per step per fingerprint
     ap.add_argument('--seed', type=int, default=0)
     # ap.add_argument('--m', type=int, default=64)
     ap.add_argument('--m', type=int, default=1)       # sampled nodes per fingerprint

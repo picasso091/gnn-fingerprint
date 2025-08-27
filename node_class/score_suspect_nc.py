@@ -2,7 +2,7 @@ import argparse, json, os, torch
 import torch.nn as nn
 from torch_geometric.utils import dense_to_sparse
 
-# ----- Univerifier -----
+# Univerifier 
 class FPVerifier(nn.Module):
     def __init__(self, in_dim: int):
         super().__init__()
