@@ -95,7 +95,7 @@ def main():
                     default='models/positives/lp_ftpr_*.pt,models/positives/distill_lp_*.pt')
     ap.add_argument('--negatives_glob', type=str, default='models/negatives/negative_lp_*.pt')
     ap.add_argument('--out_plot', type=str, default='plots/citeseer_lp_aruc.png')
-    ap.add_argument('--save_csv', type=str, default='',
+    ap.add_argument('--save_csv', type=str, default='plots/citeseer_lp_aruc.csv',
                     help='Optional: path to save thresholds/robustness/uniqueness CSV')
     args = ap.parse_args()
 

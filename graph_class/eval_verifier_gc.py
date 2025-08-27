@@ -120,7 +120,7 @@ def main():
     ap.add_argument('--out_plot', type=str, default='plots/enzymes_gc_aruc.png')
     ap.add_argument('--out_plot_kl', type=str, default='plots/enzymes_gc_kl.png')
 
-    ap.add_argument('--save_csv', type=str, default='',
+    ap.add_argument('--save_csv', type=str, default='plots/enzymes_gc_aruc.csv',
                     help='Optional: path to save thresholds/robustness/uniqueness CSV')
     args = ap.parse_args()
 

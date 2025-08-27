@@ -121,7 +121,7 @@ def main():
     ap.add_argument('--negatives_glob', type=str, default='models/negatives/negative_nc_*.pt')
     ap.add_argument('--out_plot', type=str, default='plots/cora_nc_aruc.png')   
     ap.add_argument('--out_plot_kl', type=str, default='plots/cora_nc_kl.png')
-    ap.add_argument('--save_csv', type=str, default='',
+    ap.add_argument('--save_csv', type=str, default='plots/cora_nc_aruc.csv',
                     help='Optional: path to save thresholds/robustness/uniqueness CSV')
     args = ap.parse_args()
 

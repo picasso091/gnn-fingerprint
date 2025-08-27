@@ -10,7 +10,7 @@ Steps
 3. Create folders
 
    ```bash
-   mkdir -p  data models fingerprints plots node_class link_pred graph_class
+   mkdir -p  data models fingerprints plots
    ```
 
 ### GNN task types: Node Classification, Link Prediction, Graph Classification
