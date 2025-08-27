@@ -80,3 +80,12 @@ python train_univerifier.py --dataset fingerprints/univerifier_dataset_lp.pt --f
 ```bash
 python train_univerifier.py --dataset fingerprints/univerifier_dataset_gc.pt --fingerprints_path fingerprints/fingerprints_gc.pt --out fingerprints/univerifier_gc.pt
 ```
+
+To evaluate suspect GNNs for NC tasks
+ ```bash
+ python node_class/make_suspect_neg_nc.py
+ ```
+ ```bash
+ python node_class/score_suspect_nc.py  --suspect_pt models/suspects/neg_nc_seed9999.pt  --suspect_meta models/suspects/neg_nc_seed9999.json
+ ```
+

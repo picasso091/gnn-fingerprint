@@ -1,6 +1,6 @@
 """
 Evaluate a trained Univerifier on LP positives ({target ∪ F+}) and negatives (F−)
-using saved LP fingerprints. Produces Robustness/Uniqueness curves and ARUC.
+using saved LP fingerprints. Produces Robustness/Uniqueness, Mean Test Accuracy and ARUC.
 """
 
 import argparse, glob, json, math, os, torch
@@ -156,6 +156,12 @@ def main():
     robustness = np.array([(pos_scores >= t).mean() for t in ts])  # TPR on positives
     uniqueness = np.array([(neg_scores <  t).mean() for t in ts])  # TNR on negatives
     overlap = np.minimum(robustness, uniqueness)
+    # Accuracy at each threshold
+    Npos, Nneg = len(pos_scores), len(neg_scores)
+    acc_curve = np.array([((pos_scores >= t).sum() + (neg_scores < t).sum()) / (Npos + Nneg)
+                        for t in ts])
+    mean_test_acc = float(acc_curve.mean())
+
 
     aruc = np.trapz(overlap, ts)
 
@@ -166,6 +172,7 @@ def main():
     uniq_best = float(uniqueness[idx_best])
     acc_best = 0.5 * (rob_best + uniq_best)
 
+    print(f"Mean Test Accuracy (avg over thresholds) = {mean_test_acc:.4f}")
     print(f"Models: +{len(models_pos)} | -{len(models_neg)} | D={D}")
     print(f"ARUC = {aruc:.4f}")
     print(f"Best threshold = {t_best:.3f} | Robustness={rob_best:.3f} | Uniqueness={uniq_best:.3f} | Acc={acc_best:.3f}")
@@ -175,9 +182,9 @@ def main():
         Path(os.path.dirname(args.save_csv)).mkdir(parents=True, exist_ok=True)
         with open(args.save_csv, 'w', newline='') as f:
             w = csv.writer(f)
-            w.writerow(['threshold', 'robustness', 'uniqueness', 'min_curve'])
-            for t, r, u, s in zip(ts, robustness, uniqueness, overlap):
-                w.writerow([f"{t:.5f}", f"{r:.6f}", f"{u:.6f}", f"{s:.6f}"])
+            w.writerow(['threshold', 'robustness', 'uniqueness', 'min_curve', 'accuracy'])
+            for t, r, u, s, a in zip(ts, robustness, uniqueness, shade, acc_curve):
+                w.writerow([f"{t:.5f}", f"{r:.6f}", f"{u:.6f}", f"{s:.6f}", f"{a:.6f}"])
         print(f"Saved CSV to {args.save_csv}")
 
     # Plot
