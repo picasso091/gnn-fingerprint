@@ -149,8 +149,6 @@ def main():
         print(f"Saved NEGATIVE {idx:03d} arch={arch} best_val_acc={best_val:.4f} "
               f"test_acc={test_acc:.4f} -> {out_path}")
 
-    print(json.dumps({"negatives": saved}, indent=2))
-
 
 if __name__ == "__main__":
     main()

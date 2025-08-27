@@ -3,6 +3,7 @@
 Negative models: different random seeds and/or architectures trained from scratch on the same train split.
 """
 import argparse, torch, random, json
+from pathlib import Path
 import torch.nn.functional as F
 from torch_geometric.datasets import Planetoid
 from gcn_nc import get_model
@@ -34,6 +35,13 @@ def eval_mask(model, data, mask):
     pred = out.argmax(dim=-1)
     return float((pred[mask]==data.y[mask]).float().mean())
 
+def save_model(model, path, meta):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)  # <-- ensure folder exists
+    torch.save(model.state_dict(), str(path))
+    with open(str(path).replace('.pt', '.json'), 'w') as f:
+        json.dump(meta, f)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--count', type=int, default=50)
@@ -42,6 +50,7 @@ def main():
     ap.add_argument('--lr', type=float, default=0.01)
     ap.add_argument('--wd', type=float, default=5e-4)
     ap.add_argument('--seed', type=int, default=123)
+    ap.add_argument('--out_dir', type=str, default='models/negatives')  # <-- where to save
     args = ap.parse_args()
 
     dataset = Planetoid(root='data/cora', name='Cora')
@@ -67,14 +76,13 @@ def main():
             if val > best_val:
                 best_val, best_state = val, {k:v.cpu().clone() for k,v in model.state_dict().items()}
         model.load_state_dict(best_state)
-        out_path = f"models/negatives/negative_nc_{i:03d}.pt"
-        torch.save(model.state_dict(), out_path)
-        with open(out_path.replace('.pt','.json'), 'w') as f:
-            json.dump({"arch": arch, "hidden": 64, "num_classes": dataset.num_classes, "seed": seed_i}, f)
-        saved.append(out_path)
-        print(f"Saved negative {i} arch={arch} val={best_val:.4f} -> {out_path}")
 
-    print(json.dumps({"negatives": saved}, indent=2))
+        out_path = Path(args.out_dir) / f"negative_nc_{i:03d}.pt"
+        meta = {"arch": arch, "hidden": 64, "num_classes": dataset.num_classes, "seed": seed_i}
+        save_model(model, out_path, meta)
+        
+        saved.append(str(out_path))
+        print(f"Saved negative {i} arch={arch} val={best_val:.4f} -> {out_path}")
 
 if __name__ == '__main__':
     main()

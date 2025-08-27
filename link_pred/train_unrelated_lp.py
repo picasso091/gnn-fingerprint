@@ -192,9 +192,7 @@ def main():
 
         saved.append(out_path)
         print(f"Saved NEGATIVE {i:03d} arch={arch} best_val_AUC={best_val_auc:.4f} "
-              f"test AUC={test_auc:.4f} AP={test_ap:.4f} -> {out_path}")
-
-    print(json.dumps({"negatives": saved}, indent=2))
+              f"test_AUC={test_auc:.4f} AP={test_ap:.4f} -> {out_path}")
 
 
 if __name__ == "__main__":
